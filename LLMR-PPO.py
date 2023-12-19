@@ -111,8 +111,8 @@ for epoch, batch in tqdm(enumerate(ppo_trainer.dataloader)):
         reward=reward_fn(ref_model, query, response, softmax=True, 
                          pad_token_id=tokenizer.pad_token_id, device=device)
         response_tensors.append(response.squeeze()[-gen_len:])
-    # batch["response"] = [r for r in response_tensors]
         rewards.append(reward.detach().cpu())
+    batch["response"] = [tokenizer.decode(r.squeeze()) for r in response_tensors]
 
     #### Compute sentiment score
     # rewards = reward_fn(ref_model, batch["input_ids"], batch["response"], softmax=True)
