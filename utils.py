@@ -10,13 +10,16 @@ def fix_missing_period(line):
   # print line[-1]
   return line + " ."
 
-def reward_fn(reward_model, input_ids, output_ids, softmax, pad_token_id=None, device=None):
+def reward_fn(reward_model, text, response, tokenizer, softmax, pad_token_id, device=None):
     with torch.no_grad():
+        
+        input_ids=tokenizer.encode(text, return_tensors='pt').to(device)
+        output_ids=tokenizer.encode(response, return_tensors='pt').to(device)
 
-        pad_token_id = pad_token_id or reward_model.config.pad_token_id 
-
+        pad_token_id = 0
         reward_model.eval()
         
+        # concat_input_ids=torch.cat((input_ids, output_ids), dim=1)
         outputs = reward_model(input_ids) # input_ids (B, L)
         
         logits = outputs[0] # (B, L, V)
@@ -24,19 +27,14 @@ def reward_fn(reward_model, input_ids, output_ids, softmax, pad_token_id=None, d
         #smoothing
         logits = logits - torch.mean(logits, dim=-1, keepdim=True) # (B, L, V)
         
+        # truncation
+        logits = logits[:,-len(output_ids[0]):, :]
+        
         # print("logits length", logits.shape[1])
         # print("output_ids length", output_ids.shape[1])
         
-        # Ensure the shapes are compatible
-        if logits.shape[1] > output_ids.shape[1]:
-            logits = logits[:, :output_ids.shape[1],:]
-        elif logits.shape[1] < output_ids.shape[1]:
-            padding_length = output_ids.shape[1]- logits.shape[1]
-            padding = torch.full((logits.shape[0], padding_length, logits.shape[2]), 0).to(device)
-            logits = torch.cat([logits, padding], dim=1)
-        
         selection_value = torch.gather(logits, -1, output_ids[:,:, None]).squeeze(-1) # selection value (B, L) & output_ids[..., None] (B, L, 1)
-            
+        
         selection_value.masked_fill_(output_ids == pad_token_id, 0.0)
 
         next_logits = torch.roll(logits, -1, 1)
@@ -49,6 +47,6 @@ def reward_fn(reward_model, input_ids, output_ids, softmax, pad_token_id=None, d
         next_state_value.masked_fill_(output_ids == pad_token_id, 0.0)
         next_state_value.masked_fill_(output_ids == reward_model.config.eos_token_id, 0.0)
         
-        rewards=(selection_value - next_state_value).sum()
+        reward=(selection_value - next_state_value).sum()
         # print(next_state_value)
-        return rewards
+        return reward
